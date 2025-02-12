@@ -9,30 +9,32 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import functools
 from datetime import datetime
 import subprocess
+from pydub import AudioSegment
 
 
 TIMESTAMP_FORMAT = '%Y%m%d_%H%M%S'
 
-def trim_audio(src, dest, start, end):
-  command = [
-        "ffmpeg",
-        "-i", src,   # Input file
-        "-ss", str(start),  # Start time
-        "-to", str(end),  # End time
-        "-c", "copy",  # Copy codec (no re-encoding)
-        dest
-    ]
-  subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+def trim_audio(src, dest, start, end, ext):
+  # Load the audio file
+  audio = AudioSegment.from_file(src)
+
+  # Trim the audio file (in milliseconds)
+  start_ms = float("{:.3f}".format(start)) * 1000
+  end_ms = float("{:.3f}".format(end)) * 1000
+  trimmed_audio = audio[start_ms:end_ms]
+
+  # Export the trimmed audio
+  trimmed_audio.export(dest, format=ext)  # or the desired format
 
 
-def fetch_file(parent_dir, id_column, processed_ids, row, detected_recordings):
+def fetch_file(parent_dir, processed_ids, row, detected_recordings):
     """ Downloads file from a given URL
     :param parent_dir: - default target directory
     :param row: - row from csv file, containing url
     :return:
     """
     destination_dir = parent_dir
-    item_id = row[id_column]
+    item_id = row['recording_id']
     url = row['url']
 
     if item_id in processed_ids:
@@ -49,12 +51,11 @@ def fetch_file(parent_dir, id_column, processed_ids, row, detected_recordings):
             filename = file_path.name
 
             # Generate filename for recordings
-            if id_column == 'recording_id':
-                date = datetime.strptime(row['datetime'], '%m/%d/%Y %H:%M:%S') if row['datetime'] else None
-                timestamp = date.strftime(TIMESTAMP_FORMAT)
-                name, extension = os.path.splitext(file_path)
-                filename_without_ex = f'{timestamp}-{item_id}'
-                filename = f'{timestamp}-{item_id}{extension}' if timestamp and extension else file_path.name
+            date = datetime.strptime(row['datetime'], '%m/%d/%Y %H:%M:%S') if row['datetime'] else None
+            timestamp = date.strftime(TIMESTAMP_FORMAT)
+            name, extension = os.path.splitext(file_path)
+            filename_without_ex = f'{timestamp}-{item_id}'
+            filename = f'{timestamp}-{item_id}{extension}' if timestamp and extension else file_path.name
 
             # Download file
             target = f'{destination_dir}/{filename}'
@@ -65,22 +66,21 @@ def fetch_file(parent_dir, id_column, processed_ids, row, detected_recordings):
             # Trim only detect species
             coordinates = detected_recordings[row['recording_id']]
             for coordinate in coordinates:
-              x1 = coordinate['x1']
-              x2 = coordinate['x2']
+              x1 = float(coordinate['x1'])
+              x2 = float(coordinate['x2'])
               new_target = f'{destination_dir}/{filename_without_ex}_{x1}_{x2}{extension}'
-              print(target, new_target, x1, x2)
-              trim_audio(target, new_target, x1, x2)
+              trim_audio(target, new_target, x1, x2, extension[1:])
             Path(target).unlink()
             return item_id
     except Exception as e:
-        print(f'Error downloading file with {id_column} {item_id}: ', e)
+        print(f'Error downloading file with recording_id {item_id}: ', e)
         return item_id
 
 
 if __name__ == '__main__':
     try:
-        # Get all csv files in directory; exclude download tracking files
-        files = filter(lambda x: x.endswith(".csv"), os.listdir())
+        # Get all recordings csv files in directory; exclude download tracking files
+        files = filter(lambda x: x.endswith(".csv") and x.startswith("recordings"), os.listdir())
         
         # Read Pattern matching and collect all data to dict
         pms = filter(lambda x: x.startswith("pattern_matching_rois"), os.listdir())
@@ -118,7 +118,7 @@ if __name__ == '__main__':
                     print(f'[{filename}]: Total items - {total_count}')
 
                     # Create new directory
-                    folder_name = Path(filename).stem.split('.')[0]
+                    folder_name = 'detected_recordings'
                     parent_dir = os.path.join(os.getcwd(), folder_name)
                     if not os.path.exists(parent_dir):
                         print(f'[{filename}]: Creating directory...')
@@ -126,7 +126,6 @@ if __name__ == '__main__':
 
                     # Get downloaded ids
                     tracking_file_name = f'{Path(filename).stem}.downloaded.txt'
-                    id_column = f'{folder_name[:-1:]}_id'  # Get id column name from filename/folder (super naive way to get singular form)
                     download_interrupted = os.path.exists(tracking_file_name)
                     processed_ids = []
                     if download_interrupted:
@@ -141,7 +140,7 @@ if __name__ == '__main__':
 
                     # Create subdirectories
                     if 'site_id' in content.fieldnames:
-                        site_ids = set([row['site_id'] for row in rows if row[id_column] not in processed_ids])
+                        site_ids = set([row['site_id'] for row in rows if row['recording_id'] in detected_recordings.keys()])
                         print(f'[{filename}]: Creating subdirectories for sites...')
                         for site_id in site_ids:
                             if site_id:
@@ -152,7 +151,7 @@ if __name__ == '__main__':
                                     os.makedirs(subdir)
 
                     # Prepare function
-                    download = functools.partial(fetch_file, parent_dir, id_column, processed_ids)
+                    download = functools.partial(fetch_file, parent_dir, processed_ids)
 
                     # Download files
                     print(f'[{filename}]: Reading data and downloading files from urls...')
