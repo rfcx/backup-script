@@ -13,6 +13,17 @@ from pydub import AudioSegment
 
 
 TIMESTAMP_FORMAT = '%Y%m%d_%H%M%S'
+SONGTYPES = {
+  '1': 'Common Song',
+  '2': 'Courtship Song',
+  '3': 'Territorial Song',
+  '4': 'Simple Call',
+  '5': 'Simple Call 2',
+  '6': 'Alternative Song',
+  '7': 'Alternative Song 2',
+  '8': 'Mechanical Song',
+  '9': 'Nocturnal Song',
+}
 
 def trim_audio(src, dest, start, end, ext):
   # Load the audio file
@@ -46,9 +57,10 @@ def fetch_file(parent_dir, processed_ids, row, detected_recordings, species_name
         for det_rec in detected_recordings[row['recording_id']]:
           spc_name = species_name[det_rec['species_id']]
           validated = 'present' if det_rec['validated'] == '1' else 'absent'
+          songtype = SONGTYPES[det_rec['songtype_id']].replace(' ', '_')
           if 'site_id' in row:
               site_id = row['site_id']
-              destination_dir = os.path.join(parent_dir, spc_name, validated, site_id)
+              destination_dir = os.path.join(parent_dir, f'{spc_name}_{songtype}', validated, site_id)
               if not os.path.exists(destination_dir):
                 try:
                   os.makedirs(destination_dir)
@@ -101,14 +113,16 @@ if __name__ == '__main__':
                       'x1': row['x1'],
                       'x2': row['x2'],
                       'species_id': row['species_id'],
-                      'validated': row['validated']
+                      'validated': row['validated'],
+                      'songtype_id': row['songtype_id']
                     })
                   else:
                     detected_recordings[row['recording_id']].append({
                       'x1': row['x1'],
                       'x2': row['x2'],
                       'species_id': row['species_id'],
-                      'validated': row['validated']
+                      'validated': row['validated'],
+                      'songtype_id': row['songtype_id']
                     })
         
         # Read Species and collect all data to dict
